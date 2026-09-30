@@ -55,10 +55,41 @@ pub type Error {
 pub type Transport =
   fn(jevelin.HttpRequest) -> Result(jevelin.HttpResponse, TransportError)
 
-type Answer {
+/// Mixed batches keep each answer's domain distinct.
+pub type Answer {
+  /// A selected label and a distribution validated against its alternatives.
   Choice(value: question.Choice(String))
+
+  /// A fractional rubric index and its validated distribution.
   Score(value: question.Score)
+
+  /// A yes probability, with no implicit threshold.
   Noul(value: probability.Probability)
+}
+
+/// Prepared arguments retain the request that owns their answer decoder.
+pub opaque type Arguments(answer) {
+  Arguments(
+    wire: wire_json.JsonValue,
+    request: jevelin.Request(jevelin.Evaluation(answer)),
+    encode: fn(jevelin.Evaluation(answer)) -> Result(wire_json.JsonValue, Error),
+    layout: Layout,
+  )
+}
+
+/// Successful output retains both its validated domain value and wire value.
+pub opaque type Output(answer) {
+  Output(wire: wire_json.JsonValue, value: jevelin.Evaluation(answer))
+}
+
+/// A named, already-validated question for a mixed batch.
+pub opaque type Named {
+  Named(wire: wire_json.JsonValue)
+}
+
+type Layout {
+  Single
+  Mixed
 }
 
 type Criteria {
@@ -429,4 +460,424 @@ fn field(
       |> result.map_error(fn(_) { InvalidArguments })
     _ -> Error(InvalidArguments)
   }
+}
+
+/// Prepares Choice arguments without exposing unrelated tool arguments.
+/// Duplicate labels and invalid counts fail before a transport is admitted.
+///
+/// ## Examples
+///
+/// ```gleam
+/// // evaluation.choice(state, "jev-latest", [("review", None)], None)
+/// ```
+pub fn choice(
+  state: Content,
+  model: String,
+  choices: List(#(String, Option(Content))),
+  instructions: Option(Content),
+) -> Result(Arguments(question.Choice(String)), Error) {
+  use common <- result.try(common_arguments(state, model, instructions))
+  use alternatives <- result.try(
+    list.try_map(choices, fn(pair) {
+      use description <- result.try(encode_optional_content(pair.1))
+      Ok(
+        wire_json.Object([
+          #("label", wire_json.String(pair.0)),
+          #("description", description),
+        ]),
+      )
+    }),
+  )
+  decode_choice(
+    wire_json.Object([#("choices", wire_json.Array(alternatives)), ..common]),
+    model,
+  )
+}
+
+/// Prepares Score arguments with two to ten ordered rubric levels.
+///
+/// ## Examples
+///
+/// ```gleam
+/// // evaluation.score(state, "jev-latest", [Text("Poor"), Text("Good")], None)
+/// ```
+pub fn score(
+  state: Content,
+  model: String,
+  levels: List(Content),
+  instructions: Option(Content),
+) -> Result(Arguments(question.Score), Error) {
+  use common <- result.try(common_arguments(state, model, instructions))
+  use levels <- result.try(list.try_map(levels, encode_content))
+  decode_score(
+    wire_json.Object([#("levels", wire_json.Array(levels)), ..common]),
+    model,
+  )
+}
+
+/// Prepares Noul arguments with optional evidence for either outcome.
+///
+/// ## Examples
+///
+/// ```gleam
+/// // evaluation.noul(state, "jev-latest", None, None, None)
+/// ```
+pub fn noul(
+  state: Content,
+  model: String,
+  yes: Option(Content),
+  no: Option(Content),
+  instructions: Option(Content),
+) -> Result(Arguments(probability.Probability), Error) {
+  use common <- result.try(common_arguments(state, model, instructions))
+  use yes <- result.try(encode_optional_content(yes))
+  use no <- result.try(encode_optional_content(no))
+  decode_noul(wire_json.Object([#("yes", yes), #("no", no), ..common]), model)
+}
+
+/// Names an admitted Choice for a mixed batch.
+///
+/// ## Examples
+///
+/// ```gleam
+/// // evaluation.named_choice("queue", choice_arguments)
+/// ```
+pub fn named_choice(
+  name: String,
+  args: Arguments(question.Choice(String)),
+) -> Named {
+  named(name, "choice", args.wire)
+}
+
+/// Names an admitted Score for a mixed batch.
+///
+/// ## Examples
+///
+/// ```gleam
+/// // evaluation.named_score("quality", score_arguments)
+/// ```
+pub fn named_score(name: String, args: Arguments(question.Score)) -> Named {
+  named(name, "score", args.wire)
+}
+
+/// Names an admitted Noul for a mixed batch.
+///
+/// ## Examples
+///
+/// ```gleam
+/// // evaluation.named_noul("relevant", noul_arguments)
+/// ```
+pub fn named_noul(
+  name: String,
+  args: Arguments(probability.Probability),
+) -> Named {
+  named(name, "noul", args.wire)
+}
+
+/// Prepares a mixed batch, rejecting empty batches and duplicate names.
+/// Each named question has already passed its criteria constructor.
+///
+/// ## Examples
+///
+/// ```gleam
+/// // evaluation.mixed(state, "jev-latest", [evaluation.named_noul("relevant", args)])
+/// ```
+pub fn mixed(
+  state: Content,
+  model: String,
+  questions: List(Named),
+) -> Result(Arguments(List(#(String, Answer))), Error) {
+  use state <- result.try(encode_content(state))
+  decode_mixed(
+    wire_json.Object([
+      #("state", state),
+      #("model", wire_json.String(model)),
+      #("questions", wire_json.Array(list.map(questions, fn(q) { q.wire }))),
+    ]),
+    model,
+  )
+}
+
+/// Decodes Choice input and constructs its request-bound answer contract.
+///
+/// ## Examples
+///
+/// ```gleam
+/// // evaluation.decode_choice(arguments, "jev-latest")
+/// ```
+pub fn decode_choice(
+  wire: wire_json.JsonValue,
+  default_model: String,
+) -> Result(Arguments(question.Choice(String)), Error) {
+  use input <- result.try(decode_input("jev_choice", wire, default_model))
+  use named <- result.try(single_question(input))
+  use alternatives <- result.try(case named.criteria {
+    ChoiceCriteria(values) -> Ok(values)
+    _ -> Error(InvalidArguments)
+  })
+  use q <- result.try(
+    question.choice(instruction(named.instructions), alternatives)
+    |> result.map_error(fn(_) { InvalidCriteria }),
+  )
+  prepare_single(wire, input, named, q, Choice)
+}
+
+/// Decodes Score input before invoking a handler.
+///
+/// ## Examples
+///
+/// ```gleam
+/// // evaluation.decode_score(arguments, "jev-latest")
+/// ```
+pub fn decode_score(
+  wire: wire_json.JsonValue,
+  default_model: String,
+) -> Result(Arguments(question.Score), Error) {
+  use input <- result.try(decode_input("jev_score", wire, default_model))
+  use named <- result.try(single_question(input))
+  use levels <- result.try(case named.criteria {
+    ScoreCriteria(values) -> Ok(values)
+    _ -> Error(InvalidArguments)
+  })
+  use q <- result.try(
+    question.score(instruction(named.instructions), levels)
+    |> result.map_error(fn(_) { InvalidCriteria }),
+  )
+  prepare_single(wire, input, named, q, Score)
+}
+
+/// Decodes Noul input before invoking a handler.
+///
+/// ## Examples
+///
+/// ```gleam
+/// // evaluation.decode_noul(arguments, "jev-latest")
+/// ```
+pub fn decode_noul(
+  wire: wire_json.JsonValue,
+  default_model: String,
+) -> Result(Arguments(probability.Probability), Error) {
+  use input <- result.try(decode_input("jev_noul", wire, default_model))
+  use named <- result.try(single_question(input))
+  use criteria <- result.try(case named.criteria {
+    NoulCriteria(yes, no) -> Ok(#(yes, no))
+    _ -> Error(InvalidArguments)
+  })
+  let q =
+    question.noul_with_criteria(
+      instruction(named.instructions),
+      criteria.0,
+      criteria.1,
+    )
+  prepare_single(wire, input, named, q, Noul)
+}
+
+/// Decodes and constructs every question before admitting a mixed batch.
+///
+/// ## Examples
+///
+/// ```gleam
+/// // evaluation.decode_mixed(arguments, "jev-latest")
+/// ```
+pub fn decode_mixed(
+  wire: wire_json.JsonValue,
+  default_model: String,
+) -> Result(Arguments(List(#(String, Answer))), Error) {
+  use input <- result.try(decode_input("jev_batch", wire, default_model))
+  use questions <- result.try(list.try_map(input.questions, prepare_question))
+  use request <- result.try(
+    jevelin.evaluate_with_model(input.state, input.model, batch.all(questions))
+    |> result.map_error(fn(_) { InvalidCriteria }),
+  )
+  Ok(Arguments(wire, request, encode_evaluation(_, "jev_batch"), Mixed))
+}
+
+/// Returns only the admitted tool arguments, never credentials or origins.
+///
+/// ## Examples
+///
+/// ```gleam
+/// // evaluation.arguments_json(args) is the tool codec's emitted value.
+/// ```
+pub fn arguments_json(args: Arguments(a)) -> wire_json.JsonValue {
+  args.wire
+}
+
+/// Returns output validated by the original Jevelin request.
+///
+/// ## Examples
+///
+/// ```gleam
+/// // evaluation.output_value(choice_output).answers.selected
+/// ```
+pub fn output_value(output: Output(a)) -> jevelin.Evaluation(a) {
+  output.value
+}
+
+/// Returns the schema-checked structured result for the tool encoder.
+///
+/// ## Examples
+///
+/// ```gleam
+/// // evaluation.output_json(output) preserves the public tool result.
+/// ```
+pub fn output_json(output: Output(a)) -> wire_json.JsonValue {
+  output.wire
+}
+
+/// Executes exactly one request and retains its typed, validated answer.
+///
+/// ## Examples
+///
+/// ```gleam
+/// // evaluation.execute(args, transport) returns Output with args' answer type.
+/// ```
+pub fn execute(
+  args: Arguments(a),
+  transport: Transport,
+) -> Result(Output(a), Error) {
+  use value <- result.try(
+    jevelin.send(args.request, transport) |> result.map_error(public_error),
+  )
+  use wire <- result.try(args.encode(value))
+  Ok(Output(wire, value))
+}
+
+/// Decodes an MCP result with the request carried by its original arguments.
+/// A response with unrelated labels, names, or rubric bounds cannot succeed.
+///
+/// ## Examples
+///
+/// ```gleam
+/// // evaluation.decode_output(original_args, received_structured_content)
+/// ```
+pub fn decode_output(
+  args: Arguments(a),
+  wire: wire_json.JsonValue,
+) -> Result(Output(a), Error) {
+  use model <- result.try(
+    field(wire, "model") |> result.map_error(fn(_) { InvalidAnswer }),
+  )
+  use usage <- result.try(
+    field(wire, "usage") |> result.map_error(fn(_) { InvalidAnswer }),
+  )
+  use answers <- result.try(
+    case args.layout {
+      Single ->
+        field(wire, "answer")
+        |> result.map(fn(answer) { wire_json.Object([#("result", answer)]) })
+      Mixed -> field(wire, "answers")
+    }
+    |> result.map_error(fn(_) { InvalidAnswer }),
+  )
+  let body =
+    wire_json.to_string(
+      wire_json.Object([
+        #("model", model),
+        #("usage", usage),
+        #("answers", answers),
+      ]),
+    )
+
+  // The request's decoder is also the client's proof that this result belongs
+  // to these exact criteria, including after an MCP continuation is resumed.
+  use value <- result.try(
+    jevelin.decode_response(args.request, jevelin.HttpResponse(200, [], body))
+    |> result.map_error(fn(_) { InvalidAnswer }),
+  )
+  Ok(Output(wire, value))
+}
+
+fn decode_input(
+  name: String,
+  wire: wire_json.JsonValue,
+  model: String,
+) -> Result(Input, Error) {
+  use Nil <- result.try(validate_arguments(name, wire))
+  json.parse(wire_json.to_string(wire), input_decoder(name, model))
+  |> result.map_error(fn(_) { InvalidArguments })
+}
+
+fn single_question(input: Input) -> Result(NamedQuestion, Error) {
+  case input.questions {
+    [named] -> Ok(named)
+    _ -> Error(InvalidArguments)
+  }
+}
+
+fn prepare_single(
+  wire: wire_json.JsonValue,
+  input: Input,
+  named: NamedQuestion,
+  q: question.Question(a),
+  wrap: fn(a) -> Answer,
+) -> Result(Arguments(a), Error) {
+  let q = case named.instructions {
+    Some(_) -> q
+    None -> question.without_instructions(q)
+  }
+  use request <- result.try(
+    jevelin.evaluate_with_model(
+      input.state,
+      input.model,
+      batch.question("result", q),
+    )
+    |> result.map_error(fn(_) { InvalidCriteria }),
+  )
+  let encode = fn(output: jevelin.Evaluation(a)) {
+    encode_evaluation(
+      jevelin.Evaluation(
+        output.model,
+        [#("result", wrap(output.answers))],
+        output.usage,
+      ),
+      "single",
+    )
+  }
+  Ok(Arguments(wire, request, encode, Single))
+}
+
+fn encode_content(value: Content) -> Result(wire_json.JsonValue, Error) {
+  content.encode(value)
+  |> json.to_string
+  |> wire_json.parse
+  |> result.map_error(fn(_) { InvalidArguments })
+}
+
+fn encode_optional_content(
+  value: Option(Content),
+) -> Result(wire_json.JsonValue, Error) {
+  case value {
+    Some(value) -> encode_content(value)
+    None -> Ok(wire_json.Null)
+  }
+}
+
+fn common_arguments(
+  state: Content,
+  model: String,
+  instructions: Option(Content),
+) -> Result(List(#(String, wire_json.JsonValue)), Error) {
+  use state <- result.try(encode_content(state))
+  use instructions <- result.try(encode_optional_content(instructions))
+  Ok([
+    #("state", state),
+    #("model", wire_json.String(model)),
+    #("instructions", instructions),
+  ])
+}
+
+fn named(name: String, kind: String, wire: wire_json.JsonValue) -> Named {
+  let fields = case wire {
+    wire_json.Object(fields) ->
+      list.filter(fields, fn(pair) { pair.0 != "state" && pair.0 != "model" })
+    _ -> []
+  }
+  Named(
+    wire_json.Object([
+      #("name", wire_json.String(name)),
+      #("type", wire_json.String(kind)),
+      ..fields
+    ]),
+  )
 }

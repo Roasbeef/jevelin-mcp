@@ -1,8 +1,12 @@
 import gleam/list
+import gleam/option
+import gleam/result
 import gleam/string
 import gleam_mcp/json.{Array, Bool, Float, Int, Null, Object, String}
 import gleeunit
 import jevelin
+import jevelin/content
+import jevelin/probability
 import jevelin_mcp/evaluation
 import jevelin_mcp/http
 import jevelin_mcp/tool
@@ -319,4 +323,85 @@ pub fn discovery_schemas_cover_four_shapes_without_authority_test() -> Nil {
   let assert Ok(_) = tool.server("jev-latest", never_called)
     as "Tool schemas register."
   Nil
+}
+
+pub fn typed_choice_retains_its_original_labels_test() -> Nil {
+  let assert Ok(args) =
+    evaluation.choice(
+      content.Text("fixture state"),
+      "jev-latest",
+      [#("review", option.None), #("build", option.None)],
+      option.None,
+    )
+    as "Choice criteria must construct."
+  let assert Ok(output) =
+    evaluation.execute(args, fn(_) {
+      Ok(reply(
+        "{\"result\":{\"type\":\"choice\",\"choice\":\"review\",\"confidence\":0.8,\"probabilities\":{\"review\":0.8,\"build\":0.2}}}",
+      ))
+    })
+    as "The original label distribution must decode."
+  assert evaluation.output_value(output).answers.selected == "review"
+  assert evaluation.decode_output(args, evaluation.output_json(output))
+    |> result.is_ok
+
+  let assert Ok(unrelated) =
+    evaluation.choice(
+      content.Text("fixture state"),
+      "jev-latest",
+      [#("accept", option.None), #("reject", option.None)],
+      option.None,
+    )
+    as "The second Choice must construct independently."
+  assert evaluation.decode_output(unrelated, evaluation.output_json(output))
+    == Error(evaluation.InvalidAnswer)
+}
+
+pub fn typed_constructors_reject_invalid_criteria_before_transport_test() -> Nil {
+  assert evaluation.choice(content.Text("state"), "jev-latest", [], option.None)
+    == Error(evaluation.InvalidCriteria)
+  assert evaluation.score(
+      content.Text("state"),
+      "jev-latest",
+      [content.Text("one")],
+      option.None,
+    )
+    == Error(evaluation.InvalidCriteria)
+  let assert Ok(args) =
+    evaluation.noul(
+      content.Text("state"),
+      "jev-latest",
+      option.None,
+      option.None,
+      option.None,
+    )
+    as "Noul criteria must construct."
+  let named = evaluation.named_noul("same", args)
+  assert evaluation.mixed(content.Text("state"), "jev-latest", [named, named])
+    == Error(evaluation.InvalidCriteria)
+}
+
+pub fn typed_noul_and_batch_keep_distinct_answer_shapes_test() -> Nil {
+  let assert Ok(args) =
+    evaluation.noul(
+      content.Text("state"),
+      "jev-latest",
+      option.None,
+      option.None,
+      option.None,
+    )
+    as "Noul criteria must construct."
+  let assert Ok(single) =
+    evaluation.execute(args, fn(_) {
+      Ok(reply("{\"result\":{\"type\":\"noul\",\"noul\":0.75}}"))
+    })
+    as "The single probability must decode."
+  assert probability.value(evaluation.output_value(single).answers) == 0.75
+  let assert Ok(batch) =
+    evaluation.mixed(content.Text("state"), "jev-latest", [
+      evaluation.named_noul("relevant", args),
+    ])
+    as "The named batch must construct."
+  assert evaluation.decode_output(batch, evaluation.output_json(single))
+    == Error(evaluation.InvalidAnswer)
 }
