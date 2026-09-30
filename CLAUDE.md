@@ -35,3 +35,16 @@ prose explaining why. Keep dependency locks and copied tooling separate from
 application commits. Update `docs/next.md` and these mirrored package docs
 when types, messages or dependencies change. Run one independent adversarial
 review before declaring substantive work complete.
+
+## Package boundary
+
+`jevelin_mcp` owns executable startup. `http` captures operator settings and
+credentials in a validated configuration and supplies the transport.
+`evaluation` couples typed Jevelin questions to their corresponding
+answer decoders. `tool` registers the four MCP schemas and handlers.
+
+The application consumes Jevelin and gleam_mcp through pinned dependencies.
+Tool arguments never carry a credential or provider origin. Decode inputs
+before transport and disclose fixed error categories rather than provider
+bodies. A mixed batch retains each typed question/answer coupling before
+combining them into the common output representation.
