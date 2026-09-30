@@ -4,9 +4,12 @@ Audited on 2026-09-30 against application source and dependency baseline
 `1137bf5b086b6580c590172ed00b1abe9671e981`, consuming published SDK
 `686955fc0461630bf64a4dc8eb51565dc7ca1ac9`. The full local gate passed
 through public Git dependencies, including the original compiled HTTP peer.
-Application publication and hosted CI for these pins are pending. The red
-hosted result at prior head `7f5a63b` remains a result for that head; the local
-pass does not establish a green hosted replacement.
+Runtime publication `fb5b434` passed Linux and macOS CI in
+[run 36766066616](https://github.com/Roasbeef/jevelin-mcp/actions/runs/36766066616).
+Its fresh public Linux clone passed the full gate and fifty fresh runs of
+the unchanged HTTP suite, including 150 expected 401 responses and fifty
+Origin 403 responses. No retry, readiness delay or dependency override was
+needed. This exact-head result supersedes the red hosted head `7f5a63b`.
 
 ## Where the tree is
 
@@ -71,9 +74,9 @@ status is zero. No live-provider success is implied by mock exchanges.
 
 ## What to do next
 
-1. Publish the application with SDK `686955fc` and verify hosted checks.
-   Exit: Linux and macOS CI pass the new application head, including its
-   original compiled HTTP peer through the public dependency pins.
+1. Preserve reproducible dependency updates. Exit: the full original gate
+   and Linux/macOS CI pass each new application head through its public
+   dependency pins, including the compiled HTTP peer.
 2. Run an authenticated live Jev check when a credential is available.
    Exit: a real provider request and typed answer are recorded without secrets.
 3. Keep optional MCP features in the shared library's feature scope; resources
