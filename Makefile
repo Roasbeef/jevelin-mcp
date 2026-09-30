@@ -36,3 +36,4 @@ release:
 
 e2e: release
 	python3 test/e2e.py
+	python3 test/e2e_http.py

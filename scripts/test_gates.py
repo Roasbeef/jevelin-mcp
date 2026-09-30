@@ -14,7 +14,7 @@ class GateTests(unittest.TestCase):
     def test_pure_modules_reject_effects(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            module = root / "src/gleam_mcp/json.gleam"
+            module = root / "src/jevelin_mcp/evaluation.gleam"
             module.parent.mkdir(parents=True)
             module.write_text("//// import gleam/otp/actor\nimport gleam/list\n")
             self.assertEqual(check_source(root), [])
@@ -22,6 +22,17 @@ class GateTests(unittest.TestCase):
             self.assertTrue(check_source(root))
             module.write_text('@external(erlang, "io", "write")\npub fn write() -> Nil\n')
             self.assertEqual(len(check_source(root)), 2)
+
+    def test_evaluation_cannot_reach_a_runtime_through_local_imports(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            module = root / "src/jevelin_mcp/tool.gleam"
+            module.parent.mkdir(parents=True)
+            module.write_text("import gleam_mcp/schema\nimport jevelin_mcp/evaluation\n")
+            self.assertEqual(check_source(root), [])
+            for dependency in ("jevelin_mcp/http", "gleam/httpc", "gleam_mcp/server_http", "gleam_mcp/internal/ffi_http"):
+                module.write_text("import " + dependency + "\n")
+                self.assertTrue(check_source(root), dependency)
 
     def test_documentation_mirrors_are_required(self):
         with tempfile.TemporaryDirectory() as directory:
