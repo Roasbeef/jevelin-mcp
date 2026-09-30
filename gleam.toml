@@ -1,16 +1,18 @@
 name = "jevelin_mcp"
-version = "0.1.0"
+version = "0.2.0"
 gleam = ">= 1.18.0"
-description = "A stdio MCP server for typed Jev decisions"
+description = "A typed Jev tools server over MCP stdio and HTTP"
 repository = { type = "github", user = "roasbeef", repo = "jevelin-mcp" }
 
 [dependencies]
 gleam_stdlib = ">= 1.0.0 and < 2.0.0"
+gleam_erlang = ">= 1.0.0 and < 2.0.0"
+gleam_crypto = ">= 1.0.0 and < 2.0.0"
 gleam_json = ">= 3.1.0 and < 4.0.0"
 gleam_http = ">= 4.0.0 and < 5.0.0"
 gleam_httpc = ">= 5.0.0 and < 6.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
-gleam_mcp = { git = "https://github.com/Roasbeef/gleam-mcp.git", ref = "ed5758bb11939ceab4adaceda26e891172550ec1" }
+gleam_mcp = { git = "https://github.com/Roasbeef/gleam-mcp.git", ref = "a3de7047fd594150addee2ba284be5c02a131ed0" }
 jevelin = { git = "https://github.com/Roasbeef/jevelin.git", ref = "73634519e4846047769726a24a1f6bc3dec6966d" }
 
 [dev_dependencies]

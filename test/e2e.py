@@ -112,6 +112,7 @@ class Client:
         environment = os.environ.copy()
         environment.update({
             "JEV_API_KEY": CREDENTIAL,
+            "JEV_MCP_TRANSPORT": "stdio",
             "JEV_BASE_URL": f"http://127.0.0.1:{fixture.server_port}",
             "JEV_MODEL": "jev-default-fixture",
             "JEV_TIMEOUT_MS": str(timeout_ms),

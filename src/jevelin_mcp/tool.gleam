@@ -4,9 +4,13 @@
 
 import gleam/list
 import gleam/result
+import gleam_mcp/codec
 import gleam_mcp/json.{type JsonValue, Array, Bool, Int, Object, String}
-import gleam_mcp/protocol
+import gleam_mcp/schema
 import gleam_mcp/server
+import gleam_mcp/tool as mcp_tool
+import jevelin/probability
+import jevelin/question
 import jevelin_mcp/evaluation
 
 /// Registers Choice, Score, Noul, and mixed-batch tools with one transport.
@@ -22,40 +26,161 @@ pub fn server(
   model: String,
   transport: evaluation.Transport,
 ) -> Result(server.Server, server.ConfigurationError) {
-  use tools <- result.try(
-    list.try_map(
-      [
-        #(
-          "jev_choice",
-          "Choose one supplied label and return its probability distribution.",
-        ),
-        #(
-          "jev_score",
-          "Rate content against two to ten ordered rubric levels; return a fractional expected index.",
-        ),
-        #(
-          "jev_noul",
-          "Evaluate a yes/no question and return its probability of yes, without an implicit threshold.",
-        ),
-        #(
-          "jev_batch",
-          "Evaluate independent Choice, Score, and Noul questions against one state in a single HTTP request.",
-        ),
-      ],
-      fn(definition) {
-        use tool <- result.try(
-          server.tool(
-            definition.0,
-            definition.1,
-            input_schema(definition.0),
-            fn(arguments) { call(definition.0, arguments, model, transport) },
-          ),
-        )
-        server.with_output_schema(tool, output_schema(definition.0))
-      },
-    ),
+  use choice <- result.try(bind(choice(model), transport))
+  use score <- result.try(bind(score(model), transport))
+  use noul <- result.try(bind(noul(model), transport))
+  use batch <- result.try(bind(batch(model), transport))
+
+  // Heterogeneous definitions become registry entries only after each typed
+  // argument and output contract has been bound to the same effect boundary.
+  server.new("jevelin-mcp", "0.2.0", [choice, score, noul, batch])
+}
+
+/// Shares the Choice argument and request-bound result contract with clients.
+///
+/// ## Examples
+///
+/// ```gleam
+/// // tool.choice("jev-latest") returns the definition for client.call.
+/// ```
+pub fn choice(
+  default_model: String,
+) -> Result(
+  mcp_tool.Tool(
+    evaluation.Arguments(question.Choice(String)),
+    evaluation.Output(question.Choice(String)),
+  ),
+  server.ConfigurationError,
+) {
+  definition(
+    "jev_choice",
+    "Choose one supplied label and return its probability distribution.",
+    evaluation.decode_choice(_, default_model),
   )
-  server.new("jevelin-mcp", "0.1.0", tools)
+}
+
+/// Shares the Score argument and bounded rubric result contract with clients.
+///
+/// ## Examples
+///
+/// ```gleam
+/// // tool.score("jev-latest") accepts only evaluation.Arguments(Score).
+/// ```
+pub fn score(
+  default_model: String,
+) -> Result(
+  mcp_tool.Tool(
+    evaluation.Arguments(question.Score),
+    evaluation.Output(question.Score),
+  ),
+  server.ConfigurationError,
+) {
+  definition(
+    "jev_score",
+    "Rate content against two to ten ordered rubric levels; return a fractional expected index.",
+    evaluation.decode_score(_, default_model),
+  )
+}
+
+/// Shares the Noul argument and probability result contract with clients.
+///
+/// ## Examples
+///
+/// ```gleam
+/// // tool.noul("jev-latest") returns probabilities without choosing a threshold.
+/// ```
+pub fn noul(
+  default_model: String,
+) -> Result(
+  mcp_tool.Tool(
+    evaluation.Arguments(probability.Probability),
+    evaluation.Output(probability.Probability),
+  ),
+  server.ConfigurationError,
+) {
+  definition(
+    "jev_noul",
+    "Evaluate a yes/no question and return its probability of yes, without an implicit threshold.",
+    evaluation.decode_noul(_, default_model),
+  )
+}
+
+/// Shares the mixed batch contract, preserving each question's named answer.
+///
+/// ## Examples
+///
+/// ```gleam
+/// // tool.batch("jev-latest") binds the names carried by evaluation.mixed.
+/// ```
+pub fn batch(
+  default_model: String,
+) -> Result(
+  mcp_tool.Tool(
+    evaluation.Arguments(List(#(String, evaluation.Answer))),
+    evaluation.Output(List(#(String, evaluation.Answer))),
+  ),
+  server.ConfigurationError,
+) {
+  definition(
+    "jev_batch",
+    "Evaluate independent Choice, Score, and Noul questions against one state in a single HTTP request.",
+    evaluation.decode_mixed(_, default_model),
+  )
+}
+
+fn definition(
+  name: String,
+  description: String,
+  decode: fn(JsonValue) -> Result(evaluation.Arguments(a), evaluation.Error),
+) -> Result(
+  mcp_tool.Tool(evaluation.Arguments(a), evaluation.Output(a)),
+  server.ConfigurationError,
+) {
+  use input <- result.try(
+    schema.new(input_schema(name))
+    |> result.map_error(fn(_) { server.InvalidSchema }),
+  )
+  use output <- result.try(
+    schema.new(output_schema(name))
+    |> result.map_error(fn(_) { server.InvalidSchema }),
+  )
+  let args =
+    codec.new(input, evaluation.arguments_json, fn(value) {
+      decode(value) |> result.map_error(evaluation.message)
+    })
+
+  // An answer has no independent decoder: its labels and rubric bounds are
+  // justified only by the exact original arguments retained by the client.
+  let result =
+    codec.new(output, evaluation.output_json, fn(_) {
+      Error("The original arguments are required to decode this result.")
+    })
+  use definition <- result.try(
+    mcp_tool.new(name, description, args, result)
+    |> result.map_error(fn(_) { server.InvalidSchema }),
+  )
+  Ok(
+    mcp_tool.with_result_decoder(definition, fn(args, value) {
+      evaluation.decode_output(args, value)
+      |> result.map_error(evaluation.message)
+    }),
+  )
+}
+
+fn bind(
+  definition: Result(
+    mcp_tool.Tool(evaluation.Arguments(a), evaluation.Output(a)),
+    server.ConfigurationError,
+  ),
+  transport: evaluation.Transport,
+) -> Result(server.Tool, server.ConfigurationError) {
+  use definition <- result.try(definition)
+  server.bind(definition, fn(args) {
+    evaluation.execute(args, transport)
+    |> result.map_error(fn(error) {
+      server.ExecutionFailed(evaluation.message(error))
+    })
+  })
 }
 
 /// Produces the public input contract, including structured content and explicit
@@ -190,21 +315,6 @@ pub fn output_schema(name: String) -> JsonValue {
         "usage",
       ])
     _ -> object_schema([], [])
-  }
-}
-
-fn call(
-  name: String,
-  arguments: JsonValue,
-  model: String,
-  transport: evaluation.Transport,
-) -> Result(protocol.CallToolResult, server.ToolError) {
-  case evaluation.call(name, arguments, model, transport) {
-    Ok(value) -> Ok(server.structured(value))
-    Error(evaluation.InvalidArguments as error)
-    | Error(evaluation.InvalidCriteria as error) ->
-      Error(server.InvalidArguments(evaluation.message(error)))
-    Error(error) -> Error(server.ExecutionFailed(evaluation.message(error)))
   }
 }
 

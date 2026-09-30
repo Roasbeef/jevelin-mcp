@@ -121,38 +121,26 @@ pub fn call(
   default_model: String,
   transport: Transport,
 ) -> Result(wire_json.JsonValue, Error) {
-  use _ <- result.try(validate_arguments(name, arguments))
   case name {
-    "jev_choice" | "jev_score" | "jev_noul" | "jev_batch" -> {
-      use input <- result.try(
-        json.parse(
-          wire_json.to_string(arguments),
-          input_decoder(name, default_model),
-        )
-        |> result.map_error(fn(_) { InvalidArguments }),
-      )
-      use questions <- result.try(list.try_map(
-        input.questions,
-        prepare_question,
-      ))
-      use request <- result.try(
-        jevelin.evaluate_with_model(
-          input.state,
-          input.model,
-          batch.all(questions),
-        )
-        |> result.map_error(fn(_) { InvalidCriteria }),
-      )
-
-      // The response decoder remains attached to the original criteria through
-      // transport. Its public projections are the only values serialized below.
-      use output <- result.try(
-        jevelin.send(request, transport) |> result.map_error(public_error),
-      )
-      encode_evaluation(output, name)
-    }
+    "jev_choice" ->
+      call_prepared(decode_choice(arguments, default_model), transport)
+    "jev_score" ->
+      call_prepared(decode_score(arguments, default_model), transport)
+    "jev_noul" ->
+      call_prepared(decode_noul(arguments, default_model), transport)
+    "jev_batch" ->
+      call_prepared(decode_mixed(arguments, default_model), transport)
     _ -> Error(InvalidArguments)
   }
+}
+
+fn call_prepared(
+  args: Result(Arguments(a), Error),
+  transport: Transport,
+) -> Result(wire_json.JsonValue, Error) {
+  use args <- result.try(args)
+  use output <- result.try(execute(args, transport))
+  Ok(output_json(output))
 }
 
 /// Renders a failure using fixed descriptions and a numeric HTTP status.
