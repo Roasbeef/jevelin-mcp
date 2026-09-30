@@ -26,6 +26,10 @@ class Fixture(BaseHTTPRequestHandler):
         mode = self.server.mode
         if mode == "delay":
             time.sleep(self.server.delay)
+        elif mode == "deadline":
+            # Admission is visible before the fixture withholds the response.
+            self.server.request_admitted.set()
+            self.server.response_release.wait()
         status = 200
         if mode == "http-error":
             status, body = 429, CREDENTIAL.encode()
@@ -240,14 +244,26 @@ def run(fixture):
     finally:
         client.close()
 
-    fixture.mode, fixture.delay = "delay", 0.25
-    client = Client(fixture, timeout_ms=30)
+    # The deadline must expire after HTTP admission, with no fixture response.
+    # A generous admission budget avoids relying on a thread starting in 30 ms.
+    fixture.mode = "deadline"
+    fixture.request_admitted = threading.Event()
+    fixture.response_release = threading.Event()
+    client = Client(fixture, timeout_ms=2000)
+    count = len(fixture.requests)
     try:
-        count = len(fixture.requests)
-        failed(client.tool("jev_noul", {"state": "deadline"}))
-        assert len(fixture.requests) == count + 1
+        client.send({"jsonrpc": "2.0", "id": "deadline", "method": "tools/call", "params": {
+            "name": "jev_noul", "arguments": {"state": "deadline"},
+        }})
+        assert fixture.request_admitted.wait(8), "The deadline request did not reach the HTTP fixture."
+        response = client.read()
+        assert response["id"] == "deadline"
+        failed(response)
+        assert not fixture.response_release.is_set(), "The fixture released a response before the deadline failure."
     finally:
+        fixture.response_release.set()
         client.close()
+    assert len(fixture.requests) == count + 1, "The timed-out evaluation retried."
 
     # EOF ends admission but drains the admitted request within its HTTP deadline.
     fixture.mode, fixture.delay = "delay", 0.15
