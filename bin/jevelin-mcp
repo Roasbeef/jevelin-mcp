@@ -1,0 +1,10 @@
+#!/bin/sh
+# Compilation happens at release time so stdout contains protocol frames only.
+set -eu
+task_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+task_entry="$task_root/build/erlang-shipment/entrypoint.sh"
+if [ ! -x "$task_entry" ]; then
+  echo 'Build the server first with make release.' >&2
+  exit 1
+fi
+exec "$task_entry" run

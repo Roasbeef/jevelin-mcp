@@ -1,6 +1,6 @@
-.PHONY: check fmt fmt-check build test lint lint-test doc-check source-check
+.PHONY: check fmt fmt-check build test lint lint-test doc-check source-check tooling-test release e2e
 
-check: fmt-check build test lint-test lint source-check doc-check tooling-test
+check: fmt-check build test lint-test lint source-check doc-check tooling-test e2e
 
 fmt:
 	gleam format
@@ -30,3 +30,9 @@ doc-check:
 
 tooling-test:
 	python3 scripts/test_gates.py
+
+release:
+	gleam export erlang-shipment
+
+e2e: release
+	python3 test/e2e.py
