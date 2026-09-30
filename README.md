@@ -48,7 +48,7 @@ Connect a modern MCP client to `http://127.0.0.1:8000/mcp` with
 `JEV_API_KEY` authorizes the server's upstream requests. HTTP uses POST
 and request-scoped SSE, with no initialization session or event replay.
 A remote deployment needs an authenticated TLS front proxy to the loopback
-listener. See [Gleam MCP's protocol contracts](https://github.com/Roasbeef/gleam-mcp/blob/main/docs/protocol.md).
+listener. See [the pinned Gleam MCP protocol contracts](https://github.com/Roasbeef/gleam-mcp/blob/686955fc0461630bf64a4dc8eb51565dc7ca1ac9/docs/protocol.md).
 
 ## Tools
 

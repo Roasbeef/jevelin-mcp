@@ -51,6 +51,14 @@ definitions and registers all four through `server.bind`. Result decoding
 retains the exact original criteria on the client as well as the server.
 
 The application consumes Jevelin and gleam_mcp through pinned dependencies.
+SDK `686955fc0461630bf64a4dc8eb51565dc7ca1ac9` brings public Glisten and Mist
+pins that register the connection and SSE factories before HTTP admission.
+Reverse shutdown ends admission before retiring those factories. Preserve
+that order when updating dependencies; the SDK's
+[protocol contracts](https://github.com/Roasbeef/gleam-mcp/blob/686955fc0461630bf64a4dc8eb51565dc7ca1ac9/docs/protocol.md#http-dependencies)
+and [upstream issue #55](https://github.com/rawhat/glisten/issues/55) record
+the dependency requirement.
+
 Tool arguments never carry a credential or provider origin. Decode inputs
 before transport and disclose fixed error categories rather than provider
 bodies. A mixed batch retains each typed question/answer coupling before

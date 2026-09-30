@@ -1,11 +1,12 @@
 # Current handoff
 
-Audited on 2026-09-30 against the typed-tool and HTTP integration with published SDK
-`a3de7047fd594150addee2ba284be5c02a131ed0`. The initial
-published baseline `da35e17977fce33ec72795d7c1e67ab33d0ac905` passed Linux and
-macOS CI in run `36689261574`. The previous handoff's pending-publication
-claim is superseded by that result. This edition records the subsequent typed and HTTP extension. Hosted
-checks for its published head remain distinct from the initial CI proof.
+Audited on 2026-09-30 against application source and dependency baseline
+`1137bf5b086b6580c590172ed00b1abe9671e981`, consuming published SDK
+`686955fc0461630bf64a4dc8eb51565dc7ca1ac9`. The full local gate passed
+through public Git dependencies, including the original compiled HTTP peer.
+Application publication and hosted CI for these pins are pending. The red
+hosted result at prior head `7f5a63b` remains a result for that head; the local
+pass does not establish a green hosted replacement.
 
 ## Where the tree is
 
@@ -17,13 +18,25 @@ validation for Gleam clients and server handlers. Mixed batches retain
 question/answer coupling; every decoded answer passes the original Jevelin
 request's label, rubric and batch-name contract.
 
-The application and lock consume the exact published SDK commit above; no
-private snapshot or sibling path is required. The complete gate passed
-through those Git dependencies: 13 Gleam tests, 139 copied-linter tests, four
-negative tooling tests, compiled stdio exchanges and compiled HTTP exchanges
-against an independent mock provider. Both peers exercise all four tools.
+The application and lock consume the exact published SDK commit above.
+The complete `make check` gate exited zero through those Git dependencies:
+13 Gleam tests, 139 copied-linter tests, four negative tooling tests, compiled
+stdio exchanges and compiled HTTP exchanges against an independent mock
+provider. Both original peers passed without assertion changes and exercise
+all four tools. No private snapshot or sibling path is required.
+
 A separate BEAM client calls Choice through the shared typed definition;
 it has no upstream key and proves original-request answer decoding.
+
+The SDK brings Glisten `3eb785919be0736da0a20732a56275dce0132327` and Mist
+`28b43178ff57bfb619c64b8c3544831646d5fdb9`. Glisten registers its connection
+factory before the listener and acceptors start; Mist registers its SSE
+factory before Glisten starts. Those dependencies close the local HTTP
+startup blocker, so the original compiled peer can complete its exchanges.
+The upstream report is
+[rawhat/glisten#55](https://github.com/rawhat/glisten/issues/55).
+The previous handoff's SDK pin `a3de7047` and gate description are superseded
+by this public-dependency result.
 
 HTTP tests distinguish MCP admission from upstream authorization, reject
 bad Origins and mirrored metadata before provider effects, and exercise
@@ -39,6 +52,12 @@ HTTP admission defaults to a separate required bearer token. Explicit
 `JEV_MCP_AUTH=none` permits unauthenticated loopback access. Present Origins
 must match the configured exact allowlist.
 
+HTTP admission starts only after the connection and SSE factories have
+registered. Reverse shutdown stops admission before retiring those factories.
+Preserve that ordering when updating the SDK or its transitive dependencies;
+the [pinned SDK contracts](https://github.com/Roasbeef/gleam-mcp/blob/686955fc0461630bf64a4dc8eb51565dc7ca1ac9/docs/protocol.md#http-dependencies)
+record the fork pins and framing requirements.
+
 Public errors carry fixed categories rather than provider bodies. Calls
 make one attempt. HTTP's upstream budget fits inside the stdio request
 budget, including preparation and decoding allowance. Modern argument
@@ -52,9 +71,9 @@ status is zero. No live-provider success is implied by mock exchanges.
 
 ## What to do next
 
-1. Keep exact dependency and hosted-check evidence separate from local
-   results. Exit: Linux and macOS CI pass the named published application
-   head; consumer builds use no private snapshot dependency.
+1. Publish the application with SDK `686955fc` and verify hosted checks.
+   Exit: Linux and macOS CI pass the new application head, including its
+   original compiled HTTP peer through the public dependency pins.
 2. Run an authenticated live Jev check when a credential is available.
    Exit: a real provider request and typed answer are recorded without secrets.
 3. Keep optional MCP features in the shared library's feature scope; resources
