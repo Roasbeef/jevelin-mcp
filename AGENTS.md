@@ -38,10 +38,17 @@ review before declaring substantive work complete.
 
 ## Package boundary
 
-`jevelin_mcp` owns executable startup. `http` captures operator settings and
-credentials in a validated configuration and supplies the transport.
-`evaluation` couples typed Jevelin questions to their corresponding
-answer decoders. `tool` registers the four MCP schemas and handlers.
+`jevelin_mcp` owns executable startup. `service.Mode` selects stdio or an
+explicitly admitted loopback HTTP listener. Its MCP bearer token is separate
+from `http.Configuration`, which captures the upstream Jev credential,
+origin, model, and timeout and supplies the evaluation transport.
+
+`evaluation.Arguments(answer)` couples admitted MCP inputs to the original
+`jevelin.Request(Evaluation(answer))`; `Output(answer)` retains the validated
+domain value and its public wire representation. `Named` admits prepared
+Choice, Score, or Noul criteria to a mixed batch. `tool` exposes shared typed
+definitions and registers all four through `server.bind`. Result decoding
+retains the exact original criteria on the client as well as the server.
 
 The application consumes Jevelin and gleam_mcp through pinned dependencies.
 Tool arguments never carry a credential or provider origin. Decode inputs

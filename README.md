@@ -1,6 +1,6 @@
 # Jevelin MCP
 
-A stdio MCP server for [Jev](https://docs.typesafe.ai/api), built with the
+A tools MCP server for [Jev](https://docs.typesafe.ai/api), built with the
 existing [Jevelin Gleam library](https://github.com/Roasbeef/jevelin) and
 [Gleam MCP](https://github.com/Roasbeef/gleam-mcp). It exposes typed decisions
 as four MCP tools. Jevelin constructs requests and validates answers; the
@@ -32,9 +32,23 @@ Provide the API key through the MCP client's environment configuration.
 }
 ```
 
-The client starts the server, negotiates MCP `2025-06-18` or `2024-11-05`,
-discovers tools and calls them over newline-delimited JSON-RPC. Keep the
+Stdio supports modern MCP `2026-07-28` requests with per-request metadata and
+the existing initialization profiles `2025-06-18` and `2024-11-05`. Keep the
 credential in local configuration; it is never a tool argument.
+
+For a loopback HTTP endpoint:
+
+```sh
+JEV_API_KEY=your-api-key JEV_MCP_TRANSPORT=http \
+JEV_MCP_TOKEN=your-mcp-token bin/jevelin-mcp
+```
+
+Connect a modern MCP client to `http://127.0.0.1:8000/mcp` with
+`Authorization: Bearer your-mcp-token`. This token admits MCP callers;
+`JEV_API_KEY` authorizes the server's upstream requests. HTTP uses POST
+and request-scoped SSE, with no initialization session or event replay.
+A remote deployment needs an authenticated TLS front proxy to the loopback
+listener. See [Gleam MCP's protocol contracts](https://github.com/Roasbeef/gleam-mcp/blob/main/docs/protocol.md).
 
 ## Tools
 
@@ -67,10 +81,25 @@ For example, call `jev_choice` with:
 Single tools return `{model, answer, usage}`; batch returns
 `{model, answers, usage}` keyed by the supplied question names. MCP results
 include structured content and its JSON text representation. Inputs pass
-Jevelin's smart constructors before HTTP runs. Argument failures are
-JSON-RPC errors; provider and response failures are MCP tool errors with
-`isError`. Upstream bodies and native HTTP diagnostics do not appear in
-public errors.
+Jevelin's smart constructors before HTTP runs. Modern argument failures are
+completed tool errors with `isError`; unknown tools and malformed requests
+are protocol errors. The legacy stdio profiles retain their JSON-RPC argument
+errors. Provider and response failures are tool errors. Upstream bodies and
+native HTTP diagnostics do not appear in public errors.
+
+## Typed Gleam clients
+
+`jevelin_mcp/tool` exports the same definitions that the server binds to its
+handlers. A Gleam client can use `tool.choice`, `tool.score`, `tool.noul`, or
+`tool.batch` with `gleam_mcp/client.call`. Construct arguments with
+`evaluation.choice`, `score`, `noul`, or `mixed`; their opaque types retain
+the original Jevelin request and its answer decoder.
+
+The result is `evaluation.Output(answer)`. `evaluation.output_value` returns
+the typed evaluation, so a Choice exposes its selected label and validated
+probabilities, while Noul exposes a probability without a threshold. A result
+for another label set, batch name set, or rubric can't pass the original
+request's decoder. See [the native typed client example](test/support/typed_client.gleam).
 
 ## Operator settings
 
@@ -80,6 +109,11 @@ public errors.
 | `JEV_MODEL` | `jev-latest` | Default model, overridden by an explicit tool model. |
 | `JEV_TIMEOUT_MS` | `30000` | One HTTP attempt's timeout, from 1 through 120000 ms. |
 | `JEV_BASE_URL` | `https://api.typesafe.ai` | Official HTTPS origin; loopback HTTP is accepted for local fixtures. |
+| `JEV_MCP_TRANSPORT` | `stdio` | `stdio` or a loopback `http` listener. |
+| `JEV_MCP_PORT` | `8000` | HTTP listener port. |
+| `JEV_MCP_AUTH` | `bearer` | HTTP admission; `none` explicitly permits unauthenticated loopback callers. |
+| `JEV_MCP_TOKEN` | Required for HTTP bearer admission | MCP caller credential, separate from the Jev key. |
+| `JEV_MCP_ALLOWED_ORIGINS` | Empty | Comma-separated exact browser Origins allowed on HTTP requests. |
 
 Tool arguments cannot select an HTTP origin or override credentials.
 Redirects are disabled and official HTTPS uses the HTTP library's TLS

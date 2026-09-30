@@ -7,8 +7,11 @@ Capture a command's own exit status before reading its log; the exit status
 of a later log reader says nothing about the gate.
 
 `make e2e` compiles the shipment, then runs the launcher against a local
-mock HTTP provider. It exercises protocol and HTTP behavior without a live
-Jev credential. Provider calls make one attempt under the configured budget.
+mock HTTP provider. Both stdio and HTTP peers exercise all four tools. A
+separate BEAM client consumes the shared Choice definition and its original
+request decoder through the native HTTP transport, without an upstream key.
+These fixtures exercise protocol and HTTP behavior without a live Jev
+credential. Provider calls make one attempt under the configured budget.
 
 Use separate checkouts for independent builds. Give parallel workers explicit
 file ownership and preserve one another's edits. Review source plus tests,
