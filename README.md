@@ -8,24 +8,48 @@ application supplies HTTP and operator configuration.
 
 ## Run
 
-Use Gleam >= 1.18 and Erlang/OTP >= 29:
+Build with Gleam >= 1.18, Erlang/OTP >= 29, rebar3, and Bash:
 
 ```sh
 git clone https://github.com/Roasbeef/jevelin-mcp.git
 cd jevelin-mcp
-make release
-JEV_API_KEY=your-api-key bin/jevelin-mcp
+make install
+export PATH="$HOME/.local/bin:$PATH"
+JEV_API_KEY=your-api-key jevelin-mcp
 ```
 
-`make release` compiles an Erlang shipment. The launcher runs that compiled
-shipment, so build status messages cannot enter the MCP stdout stream.
+The macOS build also uses `otool`, `install_name_tool`, and `codesign` from the
+platform's developer tools to relocate and sign a bundled crypto library.
+
+`make install` builds a self-contained OTP release and installs `jevelin-mcp` under
+`~/.local/bin`. Use `make install PREFIX=/your/prefix` to choose another
+location, then add its `bin` directory to `PATH`. The release carries ERTS, its
+OTP application closure, and boot files. On macOS it also carries the crypto
+NIF's OpenSSL library when that library comes from outside the operating system.
+The installed server requires no host Erlang, Gleam, rebar3, Bash, or checkout.
+Its launcher uses the platform's `/bin/sh` and selects its own absolute emulator
+and boot paths regardless of a parent Loom runtime's PATH or Erlang environment.
 Provide the API key through the MCP client's environment configuration.
+
+`make release` builds `build/release/jevelin-mcp`; it does not install a command
+on `PATH`. Copy that whole tree to a compatible OS and architecture, or use
+`make install`. After a release, `bin/jevelin-mcp` runs the built release from
+the checkout. The build's native runtime makes a release platform-specific;
+it is a directory of executables and libraries, not one statically linked file.
+Both launchers execute compiled code, so build status messages cannot enter
+the MCP stdout stream. The command is spelled `jevelin-mcp`.
+
+Each installation copies a complete release into a fresh directory under
+`$PREFIX/lib/jevelin-mcp`, then replaces the installed launcher with one
+pointing to that physical copy. Reinstalling leaves running servers on their
+original modules and runtime. Previous release directories remain for manual cleanup
+after those processes exit; installing does not stop a server.
 
 ```json
 {
   "mcpServers": {
     "jev": {
-      "command": "/absolute/path/jevelin-mcp/bin/jevelin-mcp",
+      "command": "/absolute/path/to/.local/bin/jevelin-mcp",
       "env": { "JEV_API_KEY": "your-api-key" }
     }
   }
@@ -40,7 +64,7 @@ For a loopback HTTP endpoint:
 
 ```sh
 JEV_API_KEY=your-api-key JEV_MCP_TRANSPORT=http \
-JEV_MCP_TOKEN=your-mcp-token bin/jevelin-mcp
+JEV_MCP_TOKEN=your-mcp-token jevelin-mcp
 ```
 
 Connect a modern MCP client to `http://127.0.0.1:8000/mcp` with
@@ -131,7 +155,10 @@ the upstream HTTP attempt.
 
 `make check` runs warning-free compilation, formatting, unit tests, the
 copied Loom linter and its tests, source and documentation checks, and a
-real subprocess MCP exchange against a local mock HTTP provider. The mock
+real subprocess MCP exchange against a local mock HTTP provider. It also checks
+the installed command from an unrelated directory and across a reinstall, with
+an incomplete Loom runtime on PATH and no host Erlang or Bash available. Its
+mock-provider call also exercises the installed OTP HTTP and crypto closure. The mock
 checks authorization, request shapes, malformed and failed responses, and
 credential exclusion without spending a live API credential. CI runs on
 Linux and macOS.
