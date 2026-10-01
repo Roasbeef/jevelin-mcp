@@ -1,4 +1,7 @@
-.PHONY: check fmt fmt-check build test lint lint-test doc-check source-check tooling-test release e2e
+PREFIX ?= $(HOME)/.local
+export PREFIX
+
+.PHONY: check fmt fmt-check build test lint lint-test doc-check source-check tooling-test release install e2e
 
 check: fmt-check build test lint-test lint source-check doc-check tooling-test e2e
 
@@ -34,6 +37,10 @@ tooling-test:
 release:
 	gleam export erlang-shipment
 
+install: release
+	bash scripts/install.sh
+
 e2e: release
 	python3 test/e2e.py
 	python3 test/e2e_http.py
+	python3 test/e2e_install.py
