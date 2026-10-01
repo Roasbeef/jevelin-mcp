@@ -63,10 +63,16 @@ def call(process, reader, identifier, method, parameters):
 
 
 def initialize(process, reader):
-    result = call(process, reader, 1, "initialize", {
-        "protocolVersion": "2025-06-18", "capabilities": {},
-        "clientInfo": {"name": "install-fixture", "version": "1"},
-    })
+    try:
+        result = call(process, reader, 1, "initialize", {
+            "protocolVersion": "2025-06-18", "capabilities": {},
+            "clientInfo": {"name": "install-fixture", "version": "1"},
+        })
+    except EOFError as error:
+        output, errors = process.communicate(timeout=8)
+        raise AssertionError(
+            f"Installed startup exited {process.returncode}; stdout={output!r}; stderr={errors!r}"
+        ) from error
     assert result["serverInfo"]["name"] == "jevelin-mcp", result
     process.stdin.write(
         b'{"jsonrpc":"2.0","method":"notifications/initialized"}\n'
