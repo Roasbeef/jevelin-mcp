@@ -1,7 +1,33 @@
-//// This executable owns operator configuration and service lifetime.
-//// Tool construction stays pure until the upstream HTTP closure is invoked.
-//// The stdio runner writes protocol frames; Mist owns the HTTP listener.
-//// Startup diagnostics use stderr in either transport mode.
+//// The executable owns configuration, tool registration, and service lifetime.
+//// It admits operator settings before starting either protocol runner. Tool
+//// construction stays pure until a bound evaluation callback invokes the HTTP
+//// transport. Stdio writes MCP frames; the SDK and Mist own the HTTP listener.
+//// Startup diagnostics use stderr so they cannot become protocol stdout.
+////
+//// ## Flow
+////
+//// 1. `main` calls `run` and renders a fixed startup/runtime error on stderr.
+//// 2. `run` reads `service.from_environment` and `http.from_environment` before
+////    constructing `tool.server` with the default model and upstream closure.
+//// 3. Stdio enters `server_stdio.run_with_options`, which owns request scopes
+////    and stdin EOF drain. Its callback budget is HTTP timeout plus five seconds.
+//// 4. HTTP enters `server_http.start_server`. `process.sleep_forever` retains
+////    the foreground owner of Mist's linked supervision tree.
+////
+//// ## Lifetime transitions
+////
+//// | Boundary | Success | Failure/end |
+//// | --- | --- | --- |
+//// | Transport/upstream configuration | Register tools | Fixed stderr diagnostic; return. |
+//// | Tool registration | Start selected runner | Fixed stderr diagnostic; return. |
+//// | Stdio runner | Admit and serve requests | EOF drains admitted work; runner returns. |
+//// | HTTP listener start | Retain linked foreground owner | Fixed stderr diagnostic; return. |
+////
+//// These are sequential lifetime boundaries, not an application-owned actor state
+//// machine. The SDK owns request cancellation and drain. HTTP does not receive
+//// stdio's outer callback timeout options; its upstream attempt still uses the
+//// configured HTTP timeout. Startup errors return Nil normally, so they do not
+//// produce a nonzero process exit status.
 
 import gleam/erlang/process
 import gleam/io
@@ -12,15 +38,16 @@ import jevelin_mcp/http
 import jevelin_mcp/service
 import jevelin_mcp/tool
 
-/// Starts the configured stdio server or loopback HTTP listener. Closing stdin
-/// ends stdio service cleanly. Configuration failures produce a fixed stderr
-/// diagnostic and no protocol data.
+/// Starts the configured stdio service or loopback HTTP listener after admitting
+/// configuration and registering all tools. Stdio returns after its EOF drain;
+/// HTTP retains the foreground owner of the linked listener tree. Fixed failures
+/// print to stderr and return Nil normally, including configuration errors.
 ///
 /// ## Examples
 ///
 /// ```gleam
 /// jevelin_mcp.main()
-/// // -> Serves MCP requests through the configured transport.
+/// // -> Serves MCP through the selected transport until that service ends.
 /// ```
 pub fn main() -> Nil {
   case run() {
@@ -30,6 +57,8 @@ pub fn main() -> Nil {
 }
 
 fn run() -> Result(Nil, String) {
+  // `use` passes the remainder as a Result continuation. A failed setting
+  // therefore stops startup before callbacks or listeners can be admitted.
   use mode <- result.try(service.from_environment())
   use configuration <- result.try(
     http.from_environment() |> result.map_error(http.message),
@@ -41,8 +70,9 @@ fn run() -> Result(Nil, String) {
     }),
   )
 
-  // The outer tool budget includes HTTP's complete deadline and five seconds
-  // for argument preparation and response decoding. EOF drains admitted work.
+  // Stdio's callback budget leaves five seconds beyond the native HTTP timeout
+  // for preparation and decoding. The SDK retains admitted callback custody
+  // through EOF drain. HTTP startup below does not consume these stdio options.
   let options =
     server_stdio.options()
     |> server_stdio.with_request_timeout(http.timeout_ms(configuration) + 5000)

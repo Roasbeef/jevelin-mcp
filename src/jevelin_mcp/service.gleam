@@ -1,6 +1,30 @@
-//// Transport selection belongs to operator configuration, before tool admission.
-//// Stdio remains the default. HTTP binds loopback and keeps its MCP credential
-//// separate from the credential that the evaluation transport sends to Jev.
+//// MCP admission belongs to the operator, before any evaluation tool can run.
+//// Stdio uses the client's process pipes. HTTP always binds loopback through the
+//// SDK and requires a distinct MCP bearer token unless the operator explicitly
+//// selects unauthenticated access. Neither mode reads the upstream Jev key.
+////
+//// ## Flow
+////
+//// 1. `from_environment` selects Stdio or enters `http_from_environment`.
+//// 2. `http_from_environment` parses the port, exact Origin allowlist, and MCP
+////    admission policy; missing bearer credentials are a configuration failure.
+//// 3. `http_mode` creates the SDK listener configuration. `bearer_admission`
+////    validates token syntax and captures it in a constant-time comparison callback.
+//// 4. The executable starts the selected runner. The SDK checks HTTP admission
+////    before a handler can reach the evaluation transport.
+////
+//// ## Admission decisions
+////
+//// | Operator selection | Result before listener startup |
+//// | --- | --- |
+//// | Missing transport or stdio | Stdio; HTTP token settings are unused. |
+//// | HTTP with missing auth or bearer | Requires JEV_MCP_TOKEN and validates it. |
+//// | HTTP with none | Explicitly admits unauthenticated loopback callers. |
+//// | Unknown transport/auth or invalid port/token | Fixed configuration error. |
+////
+//// A present browser Origin must match the SDK's exact allowlist. An empty list
+//// rejects present Origins; absence is not evidence of a trusted browser. The
+//// bearer policy authenticates callers independently of Origin or MCP metadata.
 
 import envoy
 import gleam/bit_array
@@ -19,16 +43,22 @@ pub type Mode {
   Stdio
 
   /// A loopback HTTP listener applies its own Origin and credential admission.
-  Http(config: server_http.Config)
+  Http(
+    /// Validated loopback port, /mcp path, exact Origins, and admission callback.
+    config: server_http.Config,
+  )
 }
 
-/// Reads the protocol transport settings without consulting Jev credentials.
-/// HTTP uses bearer admission unless the operator explicitly selects no auth.
+/// Selects the foreground protocol transport before reading Jev credentials.
+/// Stdio is the default. HTTP requires a separate MCP bearer token by default;
+/// only explicit JEV_MCP_AUTH=none admits unauthenticated loopback access.
+/// Environment values are read once; changing them later does not replace callbacks.
 ///
 /// ## Examples
 ///
 /// ```gleam
-/// // service.from_environment() defaults to Ok(service.Stdio).
+/// service.from_environment()
+/// // -> Ok(service.Stdio) with no JEV_MCP_TRANSPORT setting.
 /// ```
 pub fn from_environment() -> Result(Mode, String) {
   case envoy.get("JEV_MCP_TRANSPORT") |> result.unwrap("stdio") {
@@ -38,28 +68,6 @@ pub fn from_environment() -> Result(Mode, String) {
   }
 }
 
-/// Constructs a loopback endpoint with explicit host-selected admission.
-/// None deliberately selects unauthenticated access; it isn't the HTTP default.
-///
-/// ## Examples
-///
-/// ```gleam
-/// // service.http_mode(8000, [], Some("local-mcp-token"))
-/// ```
-pub fn http_mode(
-  port: Int,
-  origins: List(String),
-  token: Option(String),
-) -> Result(Mode, String) {
-  use admission <- result.try(case token {
-    None -> Ok(server_http.LocalUnauthenticated)
-    Some(token) -> bearer_admission(token)
-  })
-  server_http.new(port, "/mcp", origins, admission)
-  |> result.map(Http)
-  |> result.map_error(fn(_) { "JEV_MCP_PORT must be between 0 and 65535." })
-}
-
 fn http_from_environment() -> Result(Mode, String) {
   use port <- result.try(
     envoy.get("JEV_MCP_PORT")
@@ -67,6 +75,9 @@ fn http_from_environment() -> Result(Mode, String) {
     |> int.parse
     |> result.map_error(fn(_) { "JEV_MCP_PORT must be an integer." }),
   )
+
+  // The SDK matches Origins exactly. Comma splitting and trimming do not add
+  // wildcard, suffix, or URL-origin normalization rules to that policy.
   let origins =
     envoy.get("JEV_MCP_ALLOWED_ORIGINS")
     |> result.unwrap("")
@@ -88,7 +99,34 @@ fn http_from_environment() -> Result(Mode, String) {
   http_mode(port, origins, token)
 }
 
+/// Constructs the SDK's loopback /mcp listener with explicit caller admission.
+/// None deliberately selects unauthenticated access; it is not the environment
+/// default. Some(token) validates token characters before creating the callback.
+/// Port zero is admitted for an operating-system-selected port.
+///
+/// ## Examples
+///
+/// ```gleam
+/// assert service.http_mode(-1, [], None)
+///   == Error("JEV_MCP_PORT must be between 0 and 65535.")
+/// ```
+pub fn http_mode(
+  port: Int,
+  origins: List(String),
+  token: Option(String),
+) -> Result(Mode, String) {
+  use admission <- result.try(case token {
+    None -> Ok(server_http.LocalUnauthenticated)
+    Some(token) -> bearer_admission(token)
+  })
+  server_http.new(port, "/mcp", origins, admission)
+  |> result.map(Http)
+  |> result.map_error(fn(_) { "JEV_MCP_PORT must be between 0 and 65535." })
+}
+
 fn bearer_admission(token: String) -> Result(server_http.Admission, String) {
+  // A complete expected Authorization value is compared, so a token with
+  // separators or unrelated header text cannot broaden the callback's policy.
   let valid =
     token != ""
     && list.all(string.to_graphemes(token), fn(character) {

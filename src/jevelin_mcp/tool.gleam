@@ -1,6 +1,29 @@
-//// Four discoverable tools share one evaluation boundary. Their schemas expose
-//// application criteria, not credentials or URLs; the handlers decode the same
-//// shape and reject unknown fields before constructing Jevelin requests.
+//// Tool definitions share one contract between discovery, server, and client.
+//// Each definition pairs an input schema and typed argument codec with an output
+//// schema and encoder. The server binds an evaluation transport later; a Gleam
+//// client can construct the same definition without owning upstream credentials.
+////
+//// A general output schema cannot enumerate the labels or rubric size of every
+//// future request. `definition` therefore installs a result decoder that takes
+//// the original Arguments value. An independent output decoder is deliberately
+//// unavailable: the schema checks shape, then the retained Jevelin request checks
+//// the runtime criteria. Both checks survive a typed client's continuation.
+////
+//// ## Flow
+////
+//// 1. `server` obtains `choice`, `score`, `noul`, and `batch` definitions.
+//// 2. Each calls `definition`, which constructs `input_schema` and `output_schema`,
+////    pairs their codecs, and installs `evaluation.decode_output` for original args.
+//// 3. `bind` uses `server.bind` to connect each typed definition to
+////    `evaluation.execute` through the same caller-owned transport.
+//// 4. `server.new` registers the resulting heterogeneous tools for discovery and
+////    dispatch. Schema construction or binding failure stops registration.
+//// 5. A Gleam client uses the unbound public definition with `client.call`;
+////    argument encoding and request-bound result decoding need no Jev key.
+////
+//// Schema helper declarations follow the shapes they describe: named questions,
+//// Choice and Score criteria, answer variants, then shared JSON primitives.
+//// Credentials and origin have no place in any advertised argument shape.
 
 import gleam/list
 import gleam/result
@@ -13,14 +36,16 @@ import jevelin/probability
 import jevelin/question
 import jevelin_mcp/evaluation
 
-/// Registers Choice, Score, Noul, and mixed-batch tools with one transport.
-/// Each handler owns total argument validation and Jevelin response validation.
+/// Registers all four tools after binding their typed definitions to one transport.
+/// The type variable in each binding preserves its answer type until `server.bind`
+/// packages it as a registry entry. Registration failure returns an error before a
+/// protocol runner starts. This function constructs callbacks; it performs no I/O.
 ///
 /// ## Examples
 ///
 /// ```gleam
 /// tool.server("jev-latest", transport)
-/// // -> Ok(server) with four evaluation tools.
+/// // -> Ok(registry) with Choice, Score, Noul, and mixed-batch handlers.
 /// ```
 pub fn server(
   model: String,
@@ -36,12 +61,15 @@ pub fn server(
   server.new("jevelin-mcp", "0.2.0", [choice, score, noul, batch])
 }
 
-/// Shares the Choice argument and request-bound result contract with clients.
+/// Builds a shared typed definition for the exact selected-label and probability-key checks.
+/// The definition owns discovery schemas, argument admission, and original-argument
+/// result decoding. It captures the default model, but no transport or credential;
+/// use it in a client call or bind it to a server handler.
 ///
 /// ## Examples
 ///
 /// ```gleam
-/// // tool.choice("jev-latest") returns the definition for client.call.
+/// assert result.is_ok(tool.choice("jev-latest"))
 /// ```
 pub fn choice(
   default_model: String,
@@ -59,12 +87,15 @@ pub fn choice(
   )
 }
 
-/// Shares the Score argument and bounded rubric result contract with clients.
+/// Builds a shared typed definition for the original rubric index range and legend/probability keys.
+/// The definition owns discovery schemas, argument admission, and original-argument
+/// result decoding. It captures the default model, but no transport or credential;
+/// use it in a client call or bind it to a server handler.
 ///
 /// ## Examples
 ///
 /// ```gleam
-/// // tool.score("jev-latest") accepts only evaluation.Arguments(Score).
+/// assert result.is_ok(tool.score("jev-latest"))
 /// ```
 pub fn score(
   default_model: String,
@@ -82,12 +113,15 @@ pub fn score(
   )
 }
 
-/// Shares the Noul argument and probability result contract with clients.
+/// Builds a shared typed definition for a Probability in [0, 1] with no decision threshold.
+/// The definition owns discovery schemas, argument admission, and original-argument
+/// result decoding. It captures the default model, but no transport or credential;
+/// use it in a client call or bind it to a server handler.
 ///
 /// ## Examples
 ///
 /// ```gleam
-/// // tool.noul("jev-latest") returns probabilities without choosing a threshold.
+/// assert result.is_ok(tool.noul("jev-latest"))
 /// ```
 pub fn noul(
   default_model: String,
@@ -105,12 +139,15 @@ pub fn noul(
   )
 }
 
-/// Shares the mixed batch contract, preserving each question's named answer.
+/// Builds a shared typed definition for the complete original name set and each typed question decoder.
+/// The definition owns discovery schemas, argument admission, and original-argument
+/// result decoding. It captures the default model, but no transport or credential;
+/// use it in a client call or bind it to a server handler.
 ///
 /// ## Examples
 ///
 /// ```gleam
-/// // tool.batch("jev-latest") binds the names carried by evaluation.mixed.
+/// assert result.is_ok(tool.batch("jev-latest"))
 /// ```
 pub fn batch(
   default_model: String,
@@ -136,6 +173,8 @@ fn definition(
   mcp_tool.Tool(evaluation.Arguments(a), evaluation.Output(a)),
   server.ConfigurationError,
 ) {
+  // A schema is itself admitted data. Keeping its construction fallible makes
+  // a broken advertised contract a startup failure instead of a lying tool.
   use input <- result.try(
     schema.new(input_schema(name))
     |> result.map_error(fn(_) { server.InvalidSchema }),
@@ -144,13 +183,18 @@ fn definition(
     schema.new(output_schema(name))
     |> result.map_error(fn(_) { server.InvalidSchema }),
   )
+
+  // Encoding typed Arguments uses their retained public JSON; decoding raw
+  // input enters the very same evaluation constructors. The codec additionally
+  // checks the advertised schema in both directions.
   let args =
     codec.new(input, evaluation.arguments_json, fn(value) {
       decode(value) |> result.map_error(evaluation.message)
     })
 
-  // An answer has no independent decoder: its labels and rubric bounds are
-  // justified only by the exact original arguments retained by the client.
+  // Shape alone cannot justify a selected label or rubric index. Refusing an
+  // independent decoder prevents callers from accidentally discarding the
+  // original Arguments value when interpreting a remote successful result.
   let result =
     codec.new(output, evaluation.output_json, fn(_) {
       Error("The original arguments are required to decode this result.")
@@ -175,6 +219,9 @@ fn bind(
   transport: evaluation.Transport,
 ) -> Result(server.Tool, server.ConfigurationError) {
   use definition <- result.try(definition)
+
+  // The callback is the only entry to evaluation effects. A schema or argument
+  // refusal happens in server.bind's codec boundary before execute is invoked.
   server.bind(definition, fn(args) {
     evaluation.execute(args, transport)
     |> result.map_error(fn(error) {
@@ -183,14 +230,16 @@ fn bind(
   })
 }
 
-/// Produces the public input contract, including structured content and explicit
-/// list-based labels and names that cannot silently overwrite one another.
+/// Describes the four input shapes for discovery and codec admission.
+/// Labels and batch names use arrays so duplicates remain detectable by Jevelin's
+/// constructors. A missing model uses the operator default in the domain decoder.
+/// Unknown names return a closed empty-object schema, not a tool definition.
 ///
 /// ## Examples
 ///
 /// ```gleam
 /// tool.input_schema("jev_choice")
-/// // -> An object JSON Schema with required state and choices fields.
+/// // -> An object schema requiring state and a choices array.
 /// ```
 pub fn input_schema(name: String) -> JsonValue {
   let common = [
@@ -249,16 +298,20 @@ pub fn input_schema(name: String) -> JsonValue {
   }
 }
 
-/// Produces schemas for structured successful results. Per-request labels,
-/// probability mass, and rubric bounds are additionally enforced by Jevelin.
+/// Describes structured successful results, including model and usage.
+/// Per-request labels, rubric length, exact batch names, and probability mass
+/// require the original Jevelin decoder in addition to this schema. A general
+/// Score schema permits [0, 9]; the original rubric may permit a smaller range.
 ///
 /// ## Examples
 ///
 /// ```gleam
 /// tool.output_schema("jev_batch")
-/// // -> An object JSON Schema requiring model, answers, and usage.
+/// // -> An object schema requiring model, named answers, and usage.
 /// ```
 pub fn output_schema(name: String) -> JsonValue {
+  // Discovery describes every possible call. The schema's widest Score range
+  // cannot replace the tighter bound carried by a particular Arguments value.
   let common = [
     #("model", primitive("string")),
     #(
