@@ -6,8 +6,10 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import threading
+from http.server import ThreadingHTTPServer
 
-from e2e import FrameReader
+from e2e import CREDENTIAL, Fixture, FrameReader
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,14 +25,24 @@ def install(prefix):
     )
 
 
-def start(prefix, directory):
+def start(prefix, directory, fixture, incomplete_runtime):
     environment = {
         name: value for name, value in os.environ.items()
         if not name.startswith("JEV_")
     }
     environment.update({
-        "PATH": str(prefix / "bin") + os.pathsep + environment["PATH"],
-        "JEV_API_KEY": "install-fixture-not-a-live-key",
+        "PATH": str(prefix / "bin") + os.pathsep + str(incomplete_runtime / "erts-0/bin"),
+        "JEV_API_KEY": CREDENTIAL,
+        "JEV_BASE_URL": f"http://127.0.0.1:{fixture.server_port}",
+        "ROOTDIR": str(incomplete_runtime),
+        "ERL_ROOTDIR": str(incomplete_runtime),
+        "BINDIR": str(incomplete_runtime / "erts-0/bin"),
+        "EMU": "missing-loom-emulator",
+        "PROGNAME": "loomd",
+        "ERL_FLAGS": "-boot missing-loom-boot",
+        "ERL_AFLAGS": "-boot missing-loom-boot",
+        "ERL_ZFLAGS": "-boot missing-loom-boot",
+        "ERL_LIBS": str(incomplete_runtime / "lib"),
     })
     return subprocess.Popen(
         ["jevelin-mcp"], cwd=directory, env=environment,
@@ -62,24 +74,41 @@ def initialize(process, reader):
     process.stdin.flush()
 
 
-def run():
+def run(fixture):
     with tempfile.TemporaryDirectory(prefix="jevelin-install-") as directory:
         unrelated = Path(directory)
         prefix = unrelated / "prefix with 'quotes' $dollar `ticks`"
+        incomplete_runtime = unrelated / "loom/server.incomplete"
+        incomplete_bin = incomplete_runtime / "erts-0/bin"
+        incomplete_bin.mkdir(parents=True)
+        (incomplete_bin / "erl").write_text(
+            "#!/bin/sh\necho 'The incomplete Loom runtime was used.' >&2\nexit 69\n"
+        )
+        (incomplete_bin / "erl").chmod(0o755)
         install(prefix)
         original = (prefix / "bin/jevelin-mcp").read_text()
-        process = start(prefix, unrelated)
+        process = start(prefix, unrelated, fixture, incomplete_runtime)
         reader = FrameReader(process.stdout)
         try:
             initialize(process, reader)
             tools = call(process, reader, 2, "tools/list", {})["tools"]
             assert {tool["name"] for tool in tools} == TOOLS, tools
+            result = call(process, reader, 3, "tools/call", {
+                "name": "jev_choice", "arguments": {
+                    "state": "Installed runtime fixture.",
+                    "choices": [{"label": "review"}, {"label": "build"}],
+                },
+            })
+            assert not result.get("isError", False), result
+            assert result["structuredContent"]["answer"]["choice"] == "review", result
+            assert len(fixture.requests) == 1, fixture.requests
+            assert fixture.requests[0][1] == "Bearer " + CREDENTIAL
 
             # Reinstallation publishes another copy without changing the live VM.
             install(prefix)
             assert (prefix / "bin/jevelin-mcp").read_text() != original
             assert len(list((prefix / "lib/jevelin-mcp").iterdir())) == 2
-            tools = call(process, reader, 3, "tools/list", {})["tools"]
+            tools = call(process, reader, 4, "tools/list", {})["tools"]
             assert {tool["name"] for tool in tools} == TOOLS, tools
             process.stdin.close()
             process.stdin = None
@@ -92,7 +121,7 @@ def run():
                 process.communicate(timeout=8)
 
         # A new invocation also boots from the newly published shipment.
-        process = start(prefix, unrelated)
+        process = start(prefix, unrelated, fixture, incomplete_runtime)
         reader = FrameReader(process.stdout)
         try:
             initialize(process, reader)
@@ -108,8 +137,18 @@ def run():
                 process.kill()
                 process.communicate(timeout=8)
 
-    print("Installed MCP: PATH discovery, quoted prefix, arbitrary cwd, and reinstall passed.")
+    print("Installed MCP: bundled runtime, hostile Loom environment, fixture call, arbitrary cwd, and reinstall passed.")
 
 
 if __name__ == "__main__":
-    run()
+    fixture = ThreadingHTTPServer(("127.0.0.1", 0), Fixture)
+    fixture.daemon_threads = True
+    fixture.requests, fixture.mode, fixture.delay = [], "success", 0
+    thread = threading.Thread(target=fixture.serve_forever, daemon=True)
+    thread.start()
+    try:
+        run(fixture)
+    finally:
+        fixture.shutdown()
+        fixture.server_close()
+        thread.join(timeout=2)

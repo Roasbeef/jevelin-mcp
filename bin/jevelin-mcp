@@ -1,10 +1,10 @@
 #!/bin/sh
 # Compilation happens at release time so stdout contains protocol frames only.
 set -eu
-task_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-task_entry="$task_root/build/erlang-shipment/entrypoint.sh"
+task_root=$(CDPATH= cd -- "${0%/*}/.." && pwd -P)
+task_entry="$task_root/build/release/jevelin-mcp/bin/jevelin-mcp"
 if [ ! -x "$task_entry" ]; then
   echo 'Build the server first with make release.' >&2
   exit 1
 fi
-exec "$task_entry" run
+exec "$task_entry" "$@"

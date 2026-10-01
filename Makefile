@@ -38,7 +38,7 @@ tooling-test:
 	python3 scripts/test_gates.py
 
 release:
-	gleam export erlang-shipment
+	bash scripts/release.sh
 
 install: release
 	bash scripts/install.sh
