@@ -1,5 +1,19 @@
 # Current handoff
 
+Installation pass on 2026-10-01, based on `ed86f60`. `make install` now builds
+and copies the shipment under `PREFIX`, defaulting to `~/.local`, and publishes
+`bin/jevelin-mcp`. The Bash installer finishes a fresh physical shipment before
+replacing the launcher. Running servers retain their original modules across a
+reinstall. Old shipment directories remain for cleanup after those processes
+exit. The installed command requires Bash and Erlang/OTP >= 29 on `PATH`, but
+neither Gleam nor the source checkout. `make release` remains a build-only step.
+The installation peer exercises PATH discovery from an unrelated directory,
+a prefix containing shell metacharacters, a live server across reinstall, and
+a fresh process using the replacement launcher. No live credential is used.
+The full local `make check` exited zero: 13 application tests, 139 linter tests,
+four tooling tests, the original stdio and HTTP peers, and the installation
+peer passed. The house linter retained zero errors and 30 existing warnings.
+
 Audited on 2026-09-30 against application HEAD
 `6d68fb64797ad99b3cb305002deb03b8a1c57b9b` and the local literate source/docs
 pass based on that head. The pass changes comments, documentation, declaration
@@ -102,7 +116,8 @@ pass. The public dependency pins remain unchanged.
 3. Keep optional MCP features in the shared library's scope; resources and
    prompts remain tracked in its issue #1. This app remains four decision tools.
 
-Run `make check` or `make release`; `bin/jevelin-mcp` executes the compiled
-shipment. See [execution](execution.md), [README](../README.md),
+Run `make check` for the complete gate or `make install` to publish the command
+under `PREFIX`. `make release` builds for `bin/jevelin-mcp` in the checkout.
+See [execution](execution.md), [README](../README.md),
 [architecture](architecture.md), and [principles](principles.md) before changing
 configuration or typed boundaries.

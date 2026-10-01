@@ -13,6 +13,13 @@ request decoder through the native HTTP transport, without an upstream key.
 These fixtures exercise protocol and HTTP behavior without a live Jev
 credential. Provider calls make one attempt under the configured budget.
 
+The installation peer copies that shipment into an isolated prefix, invokes
+`jevelin-mcp` through `PATH` from an unrelated directory, and checks discovery
+before and after reinstalling while the first process is running. A new process
+then starts through the replacement launcher. It uses a dummy credential and
+never calls the provider. `make install` runs the release build before publishing
+the shipment under `PREFIX` (`~/.local` by default); `make release` only builds.
+
 Use separate checkouts for independent builds. Give parallel workers explicit
 file ownership and preserve one another's edits. Review source plus tests,
 verify each reported failure against reachable callers, and run the relevant
