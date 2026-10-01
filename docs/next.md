@@ -1,18 +1,31 @@
 # Current handoff
 
-Installation pass on 2026-10-01, based on `ed86f60`. `make install` now builds
-and copies the shipment under `PREFIX`, defaulting to `~/.local`, and publishes
-`bin/jevelin-mcp`. The Bash installer finishes a fresh physical shipment before
-replacing the launcher. Running servers retain their original modules across a
-reinstall. Old shipment directories remain for cleanup after those processes
-exit. The installed command requires Bash and Erlang/OTP >= 29 on `PATH`, but
-neither Gleam nor the source checkout. `make release` remains a build-only step.
-The installation peer exercises PATH discovery from an unrelated directory,
-a prefix containing shell metacharacters, a live server across reinstall, and
-a fresh process using the replacement launcher. No live credential is used.
-The full local `make check` exited zero: 13 application tests, 139 linter tests,
-four tooling tests, the original stdio and HTTP peers, and the installation
-peer passed. The house linter retained zero errors and 30 existing warnings.
+Bundled-runtime pass on 2026-10-01, based on `7dea8dc`. The previous installation
+contained compiled BEAM files and used `erl` from PATH. That was insufficient
+inside Loom, whose inherited PATH can select its bundled ERTS with an incomplete
+boot layout. The previous host-Erlang prerequisite is superseded here.
+
+`make release` now assembles a platform-specific OTP release with ERTS, boot
+files, and the application's OTP dependency closure. Its launcher directly
+executes its own erlexec with absolute runtime and boot paths, replacing inherited
+ROOTDIR, BINDIR, EMU and PROGNAME and clearing Erlang path/flag overrides.
+The macOS build relocates a non-system OpenSSL crypto library beside the NIF.
+Runtime needs neither host Erlang nor a compiler or Bash on PATH. Build-time
+rebar3 was already installed by the existing CI setup.
+
+`make install` copies the release under `PREFIX`, defaulting to `~/.local`,
+before atomically replacing its `/bin/sh` launcher. Running servers retain
+their original physical modules and runtime across reinstall. Old installation
+trees remain for manual cleanup after those processes exit. The installation
+peer verifies literal prefixes, unrelated cwd, initialization and four-tool
+discovery under an incomplete Loom PATH and poisoned Erlang environment, a local
+mock-provider tool call, clean EOF, and a fresh process after reinstall. No live
+credential is used. The application, dependencies and wire interfaces are unchanged.
+The full local `make check` exited zero with 13 application tests, 139 linter
+tests, four tooling tests, and all three native peers. The house linter retained
+zero errors and 30 existing warnings. Both the original stdio and HTTP peers
+now start the self-contained release; the installation peer also checks its
+actual mock-provider effect under the poisoned runtime environment.
 
 Audited on 2026-09-30 against application HEAD
 `6d68fb64797ad99b3cb305002deb03b8a1c57b9b` and the local literate source/docs

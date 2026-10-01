@@ -171,6 +171,17 @@ safe to log. No retry, durable queue, or provider-side cancellation proof exists
 
 ## Verification boundary
 
+The [release builder](../scripts/release.sh) uses relx to copy the application
+closure and ERTS into a platform-specific tree. The release launcher invokes
+its absolute erlexec and no_dot_erlang boot paths, so a parent daemon's runtime
+cannot select the executable or boot files. The [installer](../scripts/install.sh)
+copies that whole tree before publishing a launcher pinned to its physical path.
+Reinstallation preserves modules and runtime for an already-running server.
+The [installation peer](../test/e2e_install.py) uses an incomplete Loom runtime
+and inherited Erlang overrides with no host runtime on PATH, then exercises
+initialization, discovery, a mock-provider call and EOF through the installed
+command. Build tools and build output never enter the MCP stdout stream.
+
 The [unit tests](../test/jevelin_mcp_test.gleam) use an injected transport to
 prove invalid shape and criteria fail before any effect, and that unrelated
 labels or result layouts fail decoding. The compiled [stdio peer](../test/e2e.py)
