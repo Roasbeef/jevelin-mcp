@@ -1,7 +1,8 @@
 # Jevelin MCP
 
-Read `docs/next.md` before planning work and `docs/gleam-style.md` before
-writing code. This repository inherits Loom's literate Gleam style, total
+Read `docs/next.md` before planning work, then `docs/architecture.md` for the
+source reading path and `docs/principles.md` for the ownership rules. Read
+`docs/gleam-style.md` before writing code. This repository inherits Loom's literate Gleam style, total
 decoders, caller-owned effects, and house-rule linter.
 
 ## Working here
@@ -10,8 +11,11 @@ Use Gleam >= 1.18 and Erlang/OTP >= 29. `make check` runs formatting, a
 warning-free build, tests, the copied custom linter, and documentation checks.
 `make fmt` formats the application and linter. Verify commands by their own
 exit status. Public functions include examples; module documentation explains
-ownership, transitions and failure behavior. Comments are complete sentences
-with a blank line above them. Chain fallible steps with `use` and `result.try`.
+ownership, transitions and failure behavior. Large module docs carry a `## Flow`
+with real function names in order. Types come first and declarations broadly
+follow the call path; domain calls remain qualified. Transition tables must
+describe actual decisions and state which runtime owns request lifetime.
+Comments are complete sentences with a blank line above them. Chain fallible steps with `use` and `result.try`.
 Use opaque smart constructors for invariants, and domain variants for flags.
 
 The application is an Erlang runtime package. Loom-specific rules in the
@@ -48,7 +52,11 @@ origin, model, and timeout and supplies the evaluation transport.
 domain value and its public wire representation. `Named` admits prepared
 Choice, Score, or Noul criteria to a mixed batch. `tool` exposes shared typed
 definitions and registers all four through `server.bind`. Result decoding
-retains the exact original criteria on the client as well as the server.
+retains the original request on the client as well as the server. Static answer
+types enforce the relationship, while runtime decoders check labels, names,
+rubric range/keys, and probabilities. Score legend text is not compared with
+input descriptions, and shape validation does not authenticate semantic
+provenance.
 
 The application consumes Jevelin and gleam_mcp through pinned dependencies.
 SDK `686955fc0461630bf64a4dc8eb51565dc7ca1ac9` brings public Glisten and Mist
@@ -63,3 +71,7 @@ Tool arguments never carry a credential or provider origin. Decode inputs
 before transport and disclose fixed error categories rather than provider
 bodies. A mixed batch retains each typed question/answer coupling before
 combining them into the common output representation.
+
+See [architecture](docs/architecture.md) for startup, typed request/result flow,
+upstream disclosure and lifetime limits. [Principles](docs/principles.md) records
+the reasons those boundaries remain separate.

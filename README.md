@@ -97,9 +97,11 @@ the original Jevelin request and its answer decoder.
 
 The result is `evaluation.Output(answer)`. `evaluation.output_value` returns
 the typed evaluation, so a Choice exposes its selected label and validated
-probabilities, while Noul exposes a probability without a threshold. A result
-for another label set, batch name set, or rubric can't pass the original
-request's decoder. See [the native typed client example](test/support/typed_client.gleam).
+probabilities, while Noul exposes a probability without a threshold. The original
+request's decoder checks exact Choice labels, batch names, and the Score range
+and legend/probability keys. It does not authenticate semantic provenance or compare
+returned Score legend descriptions with the original level content. See
+[the native typed client example](test/support/typed_client.gleam).
 
 ## Operator settings
 
@@ -120,7 +122,10 @@ Redirects are disabled and official HTTPS uses the HTTP library's TLS
 verification. The adapter accepts UTF-8 responses up to 4 MiB. The HTTP
 library buffers a complete response before that limit is checked, so the
 limit bounds accepted data rather than network buffering. Calls make one
-attempt; the server does not retry decisions automatically.
+attempt; the server does not retry decisions automatically. Stdio callbacks
+have an outer budget of this timeout plus five seconds. HTTP startup does not
+receive those stdio timeout options; the configured timeout still applies to
+the upstream HTTP attempt.
 
 ## Development
 
@@ -133,5 +138,6 @@ Linux and macOS.
 
 Both libraries are consumed through exact Git commit dependencies. Jevelin
 is used directly rather than copied into the application. Read
-[the style guide](docs/gleam-style.md) and [current handoff](docs/next.md)
-before changing the server.
+[architecture and its source reading path](docs/architecture.md),
+[major principles](docs/principles.md), [the style guide](docs/gleam-style.md),
+and [current handoff](docs/next.md) before changing the server.

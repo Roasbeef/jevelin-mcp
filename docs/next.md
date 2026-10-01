@@ -1,88 +1,108 @@
 # Current handoff
 
-Audited on 2026-09-30 against application source and dependency baseline
-`1137bf5b086b6580c590172ed00b1abe9671e981`, consuming published SDK
-`686955fc0461630bf64a4dc8eb51565dc7ca1ac9`. The full local gate passed
-through public Git dependencies, including the original compiled HTTP peer.
-Runtime publication `fb5b434` passed Linux and macOS CI in
-[run 36766066616](https://github.com/Roasbeef/jevelin-mcp/actions/runs/36766066616).
-Its fresh public Linux clone passed the full gate and fifty fresh runs of
-the unchanged HTTP suite, including 150 expected 401 responses and fifty
-Origin 403 responses. No retry, readiness delay or dependency override was
-needed. This exact-head result supersedes the red hosted head `7f5a63b`.
+Audited on 2026-09-30 against application HEAD
+`6d68fb64797ad99b3cb305002deb03b8a1c57b9b` and the local literate source/docs
+pass based on that head. The pass changes comments, documentation, declaration
+order, and formatter-required trailing commas only. A declaration-token
+comparison preserved all five root modules' imports, signatures, string
+literals, and 91 declaration bodies. No feature, public interface, dependency,
+test, or assertion changed.
+
+The complete local `make check` gate exited zero on the resulting source tree:
+13 application tests, 139 copied-linter tests, four negative tooling tests,
+formatting, warning-free compilation, house rules, source/doc boundaries, and
+the original compiled stdio and HTTP peers. The first sandboxed end-to-end run
+could not bind its local mock listener; the fresh permissioned full gate passed.
+The copied linter reports zero errors and 30 existing warning-level findings.
+`gleam docs build` also exited zero. No credential or live-provider call was used.
 
 ## Where the tree is
 
-The server exposes `jev_choice`, `jev_score`, `jev_noul` and `jev_batch` over
-stdio or a configured loopback HTTP endpoint. It consumes the existing
-Jevelin library at `73634519e4846047769726a24a1f6bc3dec6966d`. Shared tool
-definitions couple input schemas, typed argument preparation and output
-validation for Gleam clients and server handlers. Mixed batches retain
-question/answer coupling; every decoded answer passes the original Jevelin
-request's label, rubric and batch-name contract.
+The server exposes `jev_choice`, `jev_score`, `jev_noul`, and `jev_batch` over
+stdio or a configured loopback HTTP endpoint. It consumes Jevelin at
+`73634519e4846047769726a24a1f6bc3dec6966d` and Gleam MCP at
+`686955fc0461630bf64a4dc8eb51565dc7ca1ac9` through exact public Git dependencies.
+No private snapshot or sibling path is required.
 
-The application and lock consume the exact published SDK commit above.
-The complete `make check` gate exited zero through those Git dependencies:
-13 Gleam tests, 139 copied-linter tests, four negative tooling tests, compiled
-stdio exchanges and compiled HTTP exchanges against an independent mock
-provider. Both original peers passed without assertion changes and exercise
-all four tools. No private snapshot or sibling path is required.
+Shared typed definitions bind schemas, argument preparation, result encoding,
+and original-argument result decoding for both clients and server handlers.
+`Arguments(answer)` retains the Jevelin request and decoder; `Output(answer)`
+retains the decoded domain value and public JSON. Mixed batches wrap each
+validated typed answer before combining them into a homogeneous Answer list.
+A separate native BEAM client calls Choice over HTTP using the shared definition
+and only an MCP credential.
 
-A separate BEAM client calls Choice through the shared typed definition;
-it has no upstream key and proves original-request answer decoding.
+All five application modules open with a real `## Flow`. Public variants,
+fields, and functions explain their invariants; function examples exercise
+contracts or mark effectful examples. The new
+[architecture reading path](architecture.md) follows startup, admission,
+request execution, and typed result decoding. [Principles](principles.md)
+records the reasons for the boundaries. README and mirrored package docs link
+both. The copied Loom style guide remains the language reference, with its
+application-specific scope qualified by the package docs.
 
-The SDK brings Glisten `3eb785919be0736da0a20732a56275dce0132327` and Mist
-`28b43178ff57bfb619c64b8c3544831646d5fdb9`. Glisten registers its connection
-factory before the listener and acceptors start; Mist registers its SSE
-factory before Glisten starts. Those dependencies close the local HTTP
-startup blocker, so the original compiled peer can complete its exchanges.
-The upstream report is
-[rawhat/glisten#55](https://github.com/rawhat/glisten/issues/55).
-The previous handoff's SDK pin `a3de7047` and gate description are superseded
-by this public-dependency result.
+## Rulings and limits
 
-HTTP tests distinguish MCP admission from upstream authorization, reject
-bad Origins and mirrored metadata before provider effects, and exercise
-invalid criteria and invalid selected labels. The stdio peer covers raw
-Unicode, provider failures, redirects, credential reflection, timeout and
-EOF drain. No authenticated live Jev request was made.
+The Jev origin and credential come from operator configuration, never tool
+arguments. Official HTTPS verifies TLS; redirects are disabled. Calls make one
+attempt. MCP HTTP admission uses a separate required bearer token by default;
+explicit `JEV_MCP_AUTH=none` permits unauthenticated loopback access. Present
+Origins must match the configured exact allowlist.
 
-## Rulings already made
+The accepted UTF-8 response limit is four MiB after the native HTTP library
+buffers the complete body. It does not bound network/native buffering. Raw
+and normalized JSON are scanned for the exact credential; transformed or
+partial secret echoes are not a general redaction guarantee. Public errors
+carry fixed categories and numeric statuses, never provider bodies or parser
+diagnostics. Successful state, instructions, and answers can remain sensitive.
 
-The provider origin and credential come from operator configuration, never
-tool arguments. Official HTTPS verifies TLS; redirects are disabled. MCP
-HTTP admission defaults to a separate required bearer token. Explicit
-`JEV_MCP_AUTH=none` permits unauthenticated loopback access. Present Origins
-must match the configured exact allowlist.
+Stdio's callback budget is `JEV_TIMEOUT_MS + 5000`, with EOF drain owned by the
+SDK. HTTP startup does not receive those stdio options. Its upstream native
+HTTP attempt uses `JEV_TIMEOUT_MS`, which is not a wall-clock bound for all MCP
+preparation/decoding work. Stopping a local worker does not prove remote provider
+effects stopped or rolled back. Startup errors write fixed stderr diagnostics
+and return normally, so their process exit status is zero.
 
-HTTP admission starts only after the connection and SSE factories have
-registered. Reverse shutdown stops admission before retiring those factories.
-Preserve that ordering when updating the SDK or its transitive dependencies;
-the [pinned SDK contracts](https://github.com/Roasbeef/gleam-mcp/blob/686955fc0461630bf64a4dc8eb51565dc7ca1ac9/docs/protocol.md#http-dependencies)
-record the fork pins and framing requirements.
+Request-bound decoding checks exact Choice labels, batch names, the Score
+range and legend/probability keys, and probabilities. Score legend content is decoded but not compared
+with input rubric descriptions. Equal-shaped criteria can admit an answer for
+different state or instructions; decoding does not authenticate semantic
+provenance. The shared tool codec owns JSON Schema checking separately from
+`evaluation.decode_output`'s Jevelin validation.
 
-Public errors carry fixed categories rather than provider bodies. Calls
-make one attempt. HTTP's upstream budget fits inside the stdio request
-budget, including preparation and decoding allowance. Modern argument
-refusals are completed tool errors; legacy profiles preserve their existing
-JSON-RPC argument behavior.
+HTTP admission starts after the connection and SSE factories register. Reverse
+shutdown ends admission before retiring them. The SDK pins Glisten
+`3eb785919be0736da0a20732a56275dce0132327` and Mist
+`28b43178ff57bfb619c64b8c3544831646d5fdb9`. Preserve that startup/shutdown order
+when updating dependencies. The
+[pinned SDK contracts](https://github.com/Roasbeef/gleam-mcp/blob/686955fc0461630bf64a4dc8eb51565dc7ca1ac9/docs/protocol.md#http-dependencies)
+and [rawhat/glisten#55](https://github.com/rawhat/glisten/issues/55) record why.
 
-The accepted UTF-8 response limit is four MiB after the HTTP library buffers
-the complete body; it does not bound network buffering. Startup errors
-write fixed stderr diagnostics and return normally, so their process exit
-status is zero. No live-provider success is implied by mock exchanges.
+## Evidence and next work
 
-## What to do next
+The compiled stdio peer covers all tools, Unicode, invalid input/answers,
+provider failures, redirect refusal, credential reflection, timeout, and EOF
+response drain. The HTTP peer distinguishes MCP admission from upstream
+authorization, rejects bad Origins and mirrored metadata before provider
+effects, and exercises the shared typed Choice client. Their provider is an
+independent local mock. No authenticated live Jev success is implied.
 
-1. Preserve reproducible dependency updates. Exit: the full original gate
-   and Linux/macOS CI pass each new application head through its public
-   dependency pins, including the compiled HTTP peer.
-2. Run an authenticated live Jev check when a credential is available.
-   Exit: a real provider request and typed answer are recorded without secrets.
-3. Keep optional MCP features in the shared library's feature scope; resources
-   and prompts are tracked in its issue #1. The current app remains focused
-   on its four decision tools.
+Runtime publication `fb5b434` passed Linux and macOS CI in
+[run 36766066616](https://github.com/Roasbeef/jevelin-mcp/actions/runs/36766066616).
+The previous handoff recorded its fresh public Linux full gate and fifty HTTP
+suite runs, including expected authorization and Origin refusals. That is
+historical runtime evidence; it is not hosted CI evidence for this literate
+pass. The public dependency pins remain unchanged.
+
+1. Preserve reproducible dependency updates. Exit: the full original gate and
+   Linux/macOS CI pass each new application head through its public pins,
+   including the compiled HTTP peer.
+2. Run an authenticated live Jev check when a credential is available. Exit: a
+   real provider request and typed answer are recorded without secrets.
+3. Keep optional MCP features in the shared library's scope; resources and
+   prompts remain tracked in its issue #1. This app remains four decision tools.
 
 Run `make check` or `make release`; `bin/jevelin-mcp` executes the compiled
-shipment. See [execution](execution.md), [README](../README.md) and the style
-and package docs before changing configuration or typed boundaries.
+shipment. See [execution](execution.md), [README](../README.md),
+[architecture](architecture.md), and [principles](principles.md) before changing
+configuration or typed boundaries.
