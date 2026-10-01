@@ -26,6 +26,12 @@ tests, four tooling tests, and all three native peers. The house linter retained
 zero errors and 30 existing warnings. Both the original stdio and HTTP peers
 now start the self-contained release; the installation peer also checks its
 actual mock-provider effect under the poisoned runtime environment.
+Hosted macOS exposed an installer quoting difference between Homebrew Bash and
+system Bash 3.2 for prefixes with apostrophes. The installer now escapes quotes
+with portable sed replacement; the installation peer runs its public Make recipe
+through `/usr/bin:/bin` to cover the system shell even on a Homebrew developer
+host. The previous installer reproduces an invalid POSIX wrapper under Bash 3.2;
+the corrected fixture initializes, calls the mock, reinstalls and exits cleanly.
 
 Audited on 2026-09-30 against application HEAD
 `6d68fb64797ad99b3cb305002deb03b8a1c57b9b` and the local literate source/docs

@@ -18,10 +18,11 @@ TOOLS = {"jev_choice", "jev_score", "jev_noul", "jev_batch"}
 
 def install(prefix):
     # The parent e2e target compiled the shipment. Exercise the public install
-    # recipe without repeating that build, including Make's prefix handling.
+    # recipe without repeating that build, including Make's prefix handling and
+    # macOS's system Bash 3.2 rather than a newer shell from Homebrew.
     subprocess.run(
         ["make", "--no-print-directory", "-o", "release", "install", "PREFIX=" + str(prefix)],
-        cwd=ROOT, check=True, timeout=30,
+        cwd=ROOT, env=dict(os.environ, PATH="/usr/bin:/bin"), check=True, timeout=30,
     )
 
 
