@@ -15,10 +15,11 @@ TOOLS = {"jev_choice", "jev_score", "jev_noul", "jev_batch"}
 
 
 def install(prefix):
-    environment = dict(os.environ, PREFIX=str(prefix))
+    # The parent e2e target compiled the shipment. Exercise the public install
+    # recipe without repeating that build, including Make's prefix handling.
     subprocess.run(
-        ["bash", str(ROOT / "scripts/install.sh")],
-        cwd=ROOT, env=environment, check=True, timeout=30,
+        ["make", "--no-print-directory", "-o", "release", "install", "PREFIX=" + str(prefix)],
+        cwd=ROOT, check=True, timeout=30,
     )
 
 

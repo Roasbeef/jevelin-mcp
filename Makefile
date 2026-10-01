@@ -1,4 +1,7 @@
 PREFIX ?= $(HOME)/.local
+ifeq ($(origin PREFIX),command line)
+override PREFIX := $(value PREFIX)
+endif
 export PREFIX
 
 .PHONY: check fmt fmt-check build test lint lint-test doc-check source-check tooling-test release install e2e
